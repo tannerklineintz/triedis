@@ -97,6 +97,8 @@ func (s *TrieServer) HandleCommand(conn redcon.Conn, cmd redcon.Command) {
 		if v := db.Get(key); v != nil {
 			conn.WriteBulkString(fmt.Sprintf("%v", v))
 			return
+		} else {
+			conn.WriteNull()
 		}
 
 	case "DEL":
@@ -124,9 +126,29 @@ func (s *TrieServer) HandleCommand(conn redcon.Conn, cmd redcon.Command) {
 		writeOK(conn)
 
 	case "INFO":
-		db := s.getDB(currentDB(conn))
-		info := fmt.Sprintf("# TrieRedis\r\nkeys:%d\r\n", len(db.Keys()))
-		conn.WriteBulkString(info)
+		// If caller typed "INFO KEYSPACE" accept arg[1].
+		if len(cmd.Args) > 2 {
+			conn.WriteError("ERR wrong number of arguments for 'INFO'")
+			return
+		}
+		subsection := "ALL"
+		if len(cmd.Args) == 2 {
+			subsection = strings.ToUpper(string(cmd.Args[1]))
+		}
+
+		if subsection == "KEYSPACE" || subsection == "ALL" {
+			var b strings.Builder
+			b.WriteString("# Keyspace\r\n")
+			for id, trie := range s.dbs {
+				fmt.Fprintf(&b, "db%d:keys=%d,expires=0,avg_ttl=0\r\n",
+					id, len(trie.Keys()))
+			}
+			conn.WriteBulkString(b.String())
+			return
+		}
+
+		// fall back to previous minimal INFO
+		conn.WriteBulkString("# Triedis\r\n")
 
 	default:
 		conn.WriteError("ERR unknown command '" + name + "'")
